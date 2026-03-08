@@ -1,7 +1,7 @@
 # Append my set of CFLAGS
 # Return type is enabled to avoid UB
 # TCO is enabled for avoiding stack overflow in the state machine.
-CFLAGS += -Werror=return-type -foptimize-sibling-calls
+CFLAGS += -Werror=return-type -foptimize-sibling-calls -Wall -O2
 
 default: tf
 
@@ -19,3 +19,7 @@ tf: tf.o abstractions.o
 
 test: test.o abstractions.o
 	gcc $^ -o $@
+
+clean:
+	-rm *.o tf test
+

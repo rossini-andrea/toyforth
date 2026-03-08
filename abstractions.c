@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -81,19 +82,26 @@ uint32_t String_hash(char *c_str) {
 
 bool Dictionary_init(Dictionary *self, TypeInfo *typeinfo) {
     self->typeinfo = typeinfo;
-    self->entry_typeinfo.size = typeinfo->size + sizeof(Entry);
-
-    // Entry does not need a drop, as it is handled by the dictionary
-    // itself
-    self->entry_typeinfo.drop = NULL;
-
-    if (!Array_init(&self->hashes, &hash_typeinfo)) {
+    
+    // entry typeinfo is passed around as reference so we can't allow it to move if the dictionary is moved, in this case it's better to allocate and never touch it again
+    if (!(self->entry_typeinfo = malloc(sizeof(TypeInfo)))) {
+        printf("Out of memory.\n");
         return false;
     }
 
-    // FIXME: dynamic typeinfo may move if the dictionary is moved
-    if (!Array_init(&self->entries, &self->entry_typeinfo)) {
+    // Entry does not need a drop, as it is handled by the dictionary
+    // itself
+    self->entry_typeinfo->size = typeinfo->size + sizeof(Entry);
+    self->entry_typeinfo->drop = NULL;
+
+    if (!Array_init(&self->hashes, &hash_typeinfo)) {
+        free(self->entry_typeinfo);
+        return false;
+    }
+
+    if (!Array_init(&self->entries, self->entry_typeinfo)) {
         Array_drop(&self->hashes);
+        free(self->entry_typeinfo);
         return false;
     }
 
@@ -156,13 +164,17 @@ void* Dictionary_get(Dictionary *self, char *key) {
  *
  */ 
 void Dictionary_drop(Dictionary *self) {
+    if (!self->entry_typeinfo) {
+        return;
+    }
+
     // Entries are custom dropped by the dictionary,
     // as it has knowledge of the underlying type and
     // Entry_drop is not implemented on purpose.
     for (
         void *entryptr = self->entries.data;
-        entryptr < self->entries.data + self->entries.len * self->entry_typeinfo.size;
-        entryptr += self->entry_typeinfo.size
+        entryptr < self->entries.data + self->entries.len * self->entry_typeinfo->size;
+        entryptr += self->entry_typeinfo->size
     ) {
         Entry *entry = (Entry*)entryptr;
         String_drop(entry->key);
@@ -174,6 +186,8 @@ void Dictionary_drop(Dictionary *self) {
 
     Array_drop(&self->entries);
     Array_drop(&self->hashes);
+    free(self->entry_typeinfo);
+    self->entry_typeinfo = NULL;
 }
 
 /*
