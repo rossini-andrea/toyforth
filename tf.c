@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <unistd.h>
 #include <assert.h>
 
 #include "abstractions.h"
@@ -55,6 +56,7 @@ bool TfElement_is_true(TfElement *self, bool *result) {
         case number: *result = self->numbervalue; return true;
         case boolean: *result = self->booleanvalue; return true;
         case character: *result = self->charvalue; return true;
+        default: return false;
     }
 
     return false;
@@ -633,14 +635,14 @@ void run_line(Array *program) {
                         if (a.type == number && b.type == number) {
                             bool result =
                                 prog_element->type == eq_op ?
-                                a.numbervalue = b.numbervalue :
+                                (a.numbervalue = b.numbervalue) :
                                 prog_element->type == lt_op ?
-                                a.numbervalue < b.numbervalue :
+                                (a.numbervalue < b.numbervalue) :
                                 prog_element->type == lte_op ?
-                                a.numbervalue <= b.numbervalue :
+                                (a.numbervalue <= b.numbervalue) :
                                 prog_element->type == gt_op ?
-                                a.numbervalue > b.numbervalue :
-                                a.numbervalue >= b.numbervalue;
+                                (a.numbervalue > b.numbervalue) :
+                                (a.numbervalue >= b.numbervalue);
 
                             TfElement *dest = Array_push(&interpreter.result_stack);
 
@@ -831,12 +833,21 @@ int main(int argc, char *argv[]) {
         h->exec_always = false;
         h->func = drop_handler;
 
+    bool istty = isatty(fileno(stdin));
+
     while (1) {
         char *line = NULL;
         size_t linelen;
-        printf("tf> ");
+
+        if (istty) {
+            printf("tf> ");
+        }
+
         fflush(stdout);
-        getline(&line, &linelen, stdin);
+
+        if (getline(&line, &linelen, stdin) < 0) {
+            break;
+        }
 
         TfParser line_parser;
         TfParser_init(&line_parser, line);

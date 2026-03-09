@@ -164,7 +164,7 @@ void* Dictionary_get(Dictionary *self, char *key) {
  *
  */ 
 void Dictionary_drop(Dictionary *self) {
-    if (!self->entry_typeinfo) {
+    if (!self->entry_typeinfo || !self->entries.data) {
         return;
     }
 
@@ -201,6 +201,7 @@ bool Array_init(Array *self, TypeInfo *typeinfo) {
     self->typeinfo = typeinfo;
     self->capacity = 8;
     self->len = 0;
+    self->data = NULL;
     void *data = malloc(typeinfo->size * self->capacity);
 
     if (!data) {
