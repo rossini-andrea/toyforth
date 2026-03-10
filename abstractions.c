@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,6 +7,28 @@
 
 TypeInfo hash_typeinfo = { .size = sizeof(Hash), .drop = NULL };
 TypeInfo entry_typeinfo = { .size = sizeof(Entry), .drop = NULL };
+TypeInfo array_typeinfo = { .size = sizeof(Array), .drop = Array_drop };
+
+/*
+ * malloc wrapper which prevents COW and fragmentation from calling realloc.
+ */
+void *remalloc(void *p, size_t current_count, size_t new_count, size_t size) {
+    if (size == 0 || new_count == 0 || new_count > SIZE_MAX / size) {
+        return NULL;
+    }
+
+    void *new_p = malloc(new_count * size);
+
+    if (new_p) {
+        if (current_count > 0 && p != NULL) {
+            memcpy(new_p, p, current_count * size);
+        }
+
+        free(p);
+    }
+    
+    return new_p;
+}
 
 String String_init(char *c_str) {
     size_t len = strlen(c_str);
@@ -83,7 +106,9 @@ uint32_t String_hash(char *c_str) {
 bool Dictionary_init(Dictionary *self, TypeInfo *typeinfo) {
     self->typeinfo = typeinfo;
     
-    // entry typeinfo is passed around as reference so we can't allow it to move if the dictionary is moved, in this case it's better to allocate and never touch it again
+    // entry typeinfo is passed around as reference so we can't allow it to move
+    // if the dictionary is moved, in this case it's better to allocate and
+    // never touch it again
     if (!(self->entry_typeinfo = malloc(sizeof(TypeInfo)))) {
         printf("Out of memory.\n");
         return false;
@@ -202,7 +227,7 @@ bool Array_init(Array *self, TypeInfo *typeinfo) {
     self->capacity = 8;
     self->len = 0;
     self->data = NULL;
-    void *data = malloc(typeinfo->size * self->capacity);
+    void *data = malloc(self->capacity * typeinfo->size);
 
     if (!data) {
         return false;
@@ -262,7 +287,7 @@ void* Array_push(Array *self) {
     if (capacity <= len) {
         capacity *= 2;
 
-        void *new_data = realloc(self->data, self->typeinfo->size * capacity);
+        void *new_data = remalloc(self->data, self->capacity, capacity, self->typeinfo->size);
 
         if (!new_data) {
             return NULL;

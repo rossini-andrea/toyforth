@@ -36,7 +36,7 @@ typedef struct {
     TypeInfo *typeinfo;
     TypeInfo *entry_typeinfo;
     Array /* of Hash */ hashes;
-    Array /* of Entry */ entries;
+    Array /* of Array of Entry */ entries;
 } Dictionary;
 
 /* Forces typed loop on an Array
