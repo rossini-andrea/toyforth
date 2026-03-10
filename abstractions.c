@@ -104,14 +104,17 @@ uint32_t String_hash(char *c_str) {
 }
 
 bool Dictionary_init(Dictionary *self, TypeInfo *typeinfo) {
+    size_t bucket_count = 16; // Remember to round to a power of 2 if it
+                              // becomes customizable.
     self->typeinfo = typeinfo;
+    self->bucket_mask = bucket_count - 1;
     
     // entry typeinfo is passed around as reference so we can't allow it to move
     // if the dictionary is moved, in this case it's better to allocate and
     // never touch it again
     if (!(self->entry_typeinfo = malloc(sizeof(TypeInfo)))) {
         printf("Out of memory.\n");
-        return false;
+        goto failure;
     }
 
     // Entry does not need a drop, as it is handled by the dictionary
@@ -119,76 +122,59 @@ bool Dictionary_init(Dictionary *self, TypeInfo *typeinfo) {
     self->entry_typeinfo->size = typeinfo->size + sizeof(Entry);
     self->entry_typeinfo->drop = NULL;
 
-    if (!Array_init(&self->hashes, &hash_typeinfo)) {
-        free(self->entry_typeinfo);
-        return false;
+    if (!Array_init_with_capacity(&self->buckets, &array_typeinfo, bucket_count)) {
+        goto failure;
     }
 
-    if (!Array_init(&self->entries, &array_typeinfo)) {
-        Array_drop(&self->hashes);
-        free(self->entry_typeinfo);
-        return false;
+    for (size_t i = 0; i < bucket_count; ++i) {
+        if (!Array_init(Array_push(&self->buckets), self->entry_typeinfo)) {
+            goto failure;
+        }
     }
 
     return true;
-}
+failure:
+    Array_drop(&self->buckets);
 
-Array *Dictionary_find_hash_slot(Dictionary *self, uint32_t hash) {
-    Array_foreach((&(self->hashes)), Hash, hash_element) {
-        if (hash_element->hash == hash) {
-            return ((Array*)self->entries.data) + hash_element->index;
-        }
+    if (self->entry_typeinfo) {
+        free(self->entry_typeinfo);
     }
 
-    return NULL;
+    return false;
+}
+
+Array *Dictionary_find_hash_bucket(Dictionary *self, uint32_t hash) {
+    if (!self->buckets.data) {
+        return NULL;
+    }
+
+    return ((Array*)self->buckets.data) + (hash & self->bucket_mask);
 }
 
 void* Dictionary_insert(Dictionary *self, String key) {
+    if (!key) {
+        return NULL;
+    }
+
     uint32_t key_hash = String_hash(key->c_str);
-    Array *destination_slot = Dictionary_find_hash_slot(self, key_hash);
+    Array *destination_bucket = Dictionary_find_hash_bucket(self, key_hash);
 
-    if (destination_slot) {
-        for (
-            void *entryptr = destination_slot->data;
-            entryptr < destination_slot->data + destination_slot->len * self->entry_typeinfo->size;
-            entryptr += self->entry_typeinfo->size
+    for (
+        void *entryptr = destination_bucket->data;
+        entryptr < destination_bucket->data + destination_bucket->len * self->entry_typeinfo->size;
+        entryptr += self->entry_typeinfo->size
+    ) {
+        Entry *entry = entryptr;
+
+        if (
+            entry->key->len == key->len &&
+            strcmp(entry->key->c_str, key->c_str) == 0
         ) {
-            Entry *entry = entryptr;
-
-            if (
-                entry->key->len == key->len &&
-                strcmp(entry->key->c_str, key->c_str) == 0
-            ) {
-                goto failure;
-            }
+            goto failure;
         }
     }
 
-    if (!destination_slot) {
-        destination_slot = Array_push(&self->entries);
-
-        if (!destination_slot) {
-            goto failure;
-        }
-
-        if (!Array_init(destination_slot, self->entry_typeinfo)) {
-            Array_pop(&self->entries, NULL);
-            goto failure;
-        }
-
-        Hash *new_hash = Array_push(&self->hashes);
-
-        if (!new_hash) {
-            Array_pop(&self->entries, NULL);
-            goto failure;
-        }
-
-        size_t index = destination_slot - (Array*)self->entries.data;
-        new_hash->hash = key_hash;
-        new_hash->index = index;
-    }
-
-    Entry *new_entry = Array_push(destination_slot);
+    Entry *new_entry = Array_push(destination_bucket);
 
     if (!new_entry) {
         goto failure;
@@ -208,15 +194,11 @@ failure:
  */
 void* Dictionary_get(Dictionary *self, char *key) {
     uint32_t key_hash = String_hash(key);
-    Array *slot = Dictionary_find_hash_slot(self, key_hash);
-
-    if (!slot) {
-        return NULL;
-    }
+    Array *destination_bucket = Dictionary_find_hash_bucket(self, key_hash);
 
     for (
-        void *entryptr = slot->data;
-        entryptr < slot->data + slot->len * self->entry_typeinfo->size;
+        void *entryptr = destination_bucket->data;
+        entryptr < destination_bucket->data + destination_bucket->len * self->entry_typeinfo->size;
         entryptr += self->entry_typeinfo->size
     ) {
         Entry *entry = entryptr;
@@ -236,14 +218,14 @@ void* Dictionary_get(Dictionary *self, char *key) {
  *
  */ 
 void Dictionary_drop(Dictionary *self) {
-    if (!self->entry_typeinfo || !self->entries.data) {
+    if (!self->entry_typeinfo || !self->buckets.data) {
         return;
     }
 
     // Entries are custom dropped by the dictionary,
     // as it has knowledge of the underlying type and
     // Entry_drop is not implemented on purpose.
-    Array_foreach(&self->entries, Array, slot) {
+    Array_foreach(&self->buckets, Array, slot) {
         for (
             void *entryptr = slot->data;
             entryptr < slot->data + slot->len * self->entry_typeinfo->size;
@@ -258,8 +240,7 @@ void Dictionary_drop(Dictionary *self) {
         }
     }
 
-    Array_drop(&self->entries);
-    Array_drop(&self->hashes);
+    Array_drop(&self->buckets);
     free(self->entry_typeinfo);
     self->entry_typeinfo = NULL;
 }
@@ -272,13 +253,27 @@ void Dictionary_drop(Dictionary *self) {
  * Returns true on success.
  */
 bool Array_init(Array *self, TypeInfo *typeinfo) {
+    return Array_init_with_capacity(self, typeinfo, 8);
+}
+
+/*
+ * Initializes a new array object with initial capacity.
+ * Parameters:
+ * self: reference to array to initialize
+ * element_size: sizeof(T), the type of elements to hold.
+ * capacity: initial available space.
+ * Returns true on success.
+ */
+bool Array_init_with_capacity(Array *self, TypeInfo *typeinfo, size_t capacity) {
     self->typeinfo = typeinfo;
-    self->capacity = 8;
+    self->capacity = capacity;
     self->len = 0;
     self->data = NULL;
     void *data = malloc(self->capacity * typeinfo->size);
 
     if (!data) {
+        self->typeinfo = NULL;
+        self->capacity = 0;
         return false;
     }
 

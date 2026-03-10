@@ -1,10 +1,12 @@
 #include <stdint.h>
 #include <stddef.h>
 
+typedef void (*DefaultInitFunction)(void*);
 typedef void (*DropFunction)(void*);
 
 typedef struct {
     size_t size;
+    DefaultInitFunction default_init;
     DropFunction drop;
 } TypeInfo;
 
@@ -35,8 +37,8 @@ typedef struct {
 typedef struct {
     TypeInfo *typeinfo;
     TypeInfo *entry_typeinfo;
-    Array /* of Hash */ hashes;
-    Array /* of Array of Entry */ entries;
+    size_t bucket_mask;
+    Array /* of Array of Entry */ buckets;
 } Dictionary;
 
 /* Forces typed loop on an Array
@@ -59,6 +61,7 @@ void* Dictionary_get(Dictionary *self, char *key);
 void Dictionary_drop(Dictionary *self);
 
 bool Array_init(Array *self, TypeInfo *typeinfo);
+bool Array_init_with_capacity(Array *self, TypeInfo *typeinfo, size_t size);
 void* Array_detach(Array *self);
 void Array_drop(Array *self);
 void* Array_push(Array *self);

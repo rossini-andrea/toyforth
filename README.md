@@ -57,7 +57,7 @@ If a method, or any other function, wants to own a struct, it must:
 
 ## AI usage
 
-A local 16GB Radeon was stressed with ollama+claude+qwen to review for
+A local 16GB Radeon was stressed with llama.cpp+claude+qwen to review for
 memory leaks. No other LLMs were harmed in the making of this project.
 All code is hand crafted, except when stated, but since antirez is
 incorporating more and more LLM usage in his lessons, expect the same here.
