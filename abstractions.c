@@ -30,6 +30,11 @@ void *remalloc(void *p, size_t current_count, size_t new_count, size_t size) {
     return new_p;
 }
 
+/*
+ * Creates a new String from a C string.
+ * The source string is borrowed.
+ * Thus it is still owned by the caller.
+ */
 String String_init(char *c_str) {
     size_t len = strlen(c_str);
     String self = malloc(sizeof(struct String_s) + len + 1);
@@ -61,6 +66,11 @@ String String_copy(String str) {
     return self;
 }
 
+/*
+ * Creates a new String from a slice of a C string.
+ * The source string is borrowed.
+ * Thus it is still owned by the caller.
+ */
 String String_from_slice(char *c_str, size_t len) {
     String self = malloc(sizeof(struct String_s) + len + 1);
 
@@ -75,6 +85,9 @@ String String_from_slice(char *c_str, size_t len) {
     return self;
 }
 
+/*
+ * Frees a String and its underlying memory.
+ */
 void String_drop(String self) {
     free(self);
 }
@@ -103,6 +116,13 @@ uint32_t String_hash(char *c_str) {
     return hash;
 }
 
+/*
+ * Initializes a Dictionary with the given typeinfo.
+ * The dictionary uses a hash table with power-of-2 sized buckets.
+ * The entry_typeinfo is pinned in place (won't move) to allow safe
+ * access from buckets.
+ * Returns true on success, false on failure.
+ */
 bool Dictionary_init(Dictionary *self, TypeInfo *typeinfo) {
     size_t bucket_count = 16; // Remember to round to a power of 2 if it
                               // becomes customizable.
@@ -143,6 +163,10 @@ failure:
     return false;
 }
 
+/*
+ * Finds the hash bucket for a given hash.
+ * Uses the bucket_mask to compute the bucket index.
+ */
 Array *Dictionary_find_hash_bucket(Dictionary *self, uint32_t hash) {
     if (!self->buckets.data) {
         return NULL;
@@ -151,6 +175,12 @@ Array *Dictionary_find_hash_bucket(Dictionary *self, uint32_t hash) {
     return ((Array*)self->buckets.data) + (hash & self->bucket_mask);
 }
 
+/*
+ * Inserts a key-value pair into the dictionary.
+ * If a key with the same name already exists, returns NULL.
+ * The key is consumed (moved) into the dictionary.
+ * Returns a pointer to the value, or NULL on failure.
+ */
 void* Dictionary_insert(Dictionary *self, String key) {
     if (!key) {
         return NULL;
@@ -189,8 +219,10 @@ failure:
     return NULL;
 }
 
-/* Gets an element by key.
- * If the element does not exist return NULL.
+/*
+ * Gets an element by key.
+ * If the element does not exist, returns NULL.
+ * The key is borrowed (not moved).
  */
 void* Dictionary_get(Dictionary *self, char *key) {
     uint32_t key_hash = String_hash(key);

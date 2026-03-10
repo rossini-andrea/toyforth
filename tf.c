@@ -34,6 +34,10 @@ typedef struct {
     };
 } TfElement;
 
+/*
+ * Frees a TfElement's owned resources.
+ * Drops String and word fields if present.
+ */
 void TfElement_drop(TfElement *self) {
     if (self->type == string && self->stringvalue) {
         String_drop(self->stringvalue);
@@ -47,7 +51,9 @@ void TfElement_drop(TfElement *self) {
 }
 
 /*
- * Checks wether a TfElement contains a true value.
+ * Checks whether a TfElement contains a true value.
+ * The result is stored in result, while a return
+ * value of false signals undefined test.
  * The result is stored in result, while a return
  * value of false signals undefined test.
  */
@@ -99,10 +105,17 @@ bool TfParser_init(TfParser *parser, char *token) {
     return Array_init(&parser->result, &tfelement_typeinfo);
 }
 
+/*
+ * Frees a TfParser and its result array.
+ */
 void TfParser_drop(TfParser *parser) {
     Array_drop(&parser->result);
 }
 
+/*
+ * The start state of the parser.
+ * Dispatches to appropriate state functions based on the first character.
+ */
 bool TfParser_state_start(TfParser *parser) {
     for (; *parser->token; ++parser->token) {
         if (isspace(*parser->token)) {
@@ -138,6 +151,10 @@ bool TfParser_state_start(TfParser *parser) {
     return true;
 }
 
+/*
+ * Parses a number with optional negative sign.
+ * The factor determines the sign (1 for positive, -1 for negative).
+ */
 bool TfParser_state_number_impl(TfParser *parser, int factor) {
     int accum = *parser->token - '0';
 
@@ -456,6 +473,10 @@ bool TfParser_state_word(TfParser *parser) {
     STATE_TRANSFER(TfParser_state_start);
 }
 
+/*
+ * Parses the entire input string.
+ * Continues in state machine mode until all tokens are parsed.
+ */
 bool TfParser_parse(TfParser *parser) {
     while (parser->state_func) {
         if (!parser->state_func(parser)) {
@@ -468,6 +489,10 @@ bool TfParser_parse(TfParser *parser) {
 
 // ===========================================================================
 
+/*
+ * Represents the type of a scope (normal, if, else).
+ * Used for conditional execution in Forth.
+ */
 typedef enum {
     NORMAL,
     IF,
@@ -493,6 +518,11 @@ typedef struct {
     WordHandlerFunc func;
 } WordHandler;
 
+/*
+ * Initializes a TfInterpreter.
+ * Sets up the result stack, scope stack, and initial scope.
+ * Returns true on success, false on failure.
+ */
 bool TfInterpreter_init(TfInterpreter *self) {
     if (!Array_init(&self->result_stack, &tfelement_typeinfo)) {
         return false;
@@ -517,11 +547,17 @@ bool TfInterpreter_init(TfInterpreter *self) {
     return true;
 }
 
+/*
+ * Frees a TfInterpreter and its stacks.
+ */
 void TfInterpreter_drop(TfInterpreter *self) {
     Array_drop(&self->result_stack);
     Array_drop(&self->scope_stack);
 }
 
+/*
+ * Pops all elements from the result stack and prints them.
+ */
 void do_print(TfInterpreter *interpreter) {
     TfElement popped;
 
@@ -548,6 +584,11 @@ void do_print(TfInterpreter *interpreter) {
 
 Dictionary words;
 
+/*
+ * Executes a parsed program.
+ * Initializes an interpreter and runs each element in the program.
+ * Handles numbers, operators, and Forth words (if, else, then, cr, dup, drop).
+ */
 void run_line(Array *program) {
     TfInterpreter interpreter;
 
@@ -709,6 +750,10 @@ cleanup:
     TfInterpreter_drop(&interpreter);
 }
 
+/*
+ * Duplicates the top element on the result stack.
+ * Returns false if the stack is empty.
+ */
 bool dup_handler(TfInterpreter *interpreter) {
     TfElement *element = Array_last(&interpreter->result_stack);
 
@@ -729,6 +774,12 @@ bool dup_handler(TfInterpreter *interpreter) {
     return true;
 }
 
+/*
+ * Pushes a new scope on the scope stack for conditional execution.
+ * If the top of the stack is true, the new scope will execute.
+ * Otherwise, it will not execute.
+ * Returns false if no boolean value is on the stack.
+ */
 bool if_handler(TfInterpreter *interpreter) {
     TfScope *current_scope = (TfScope*)Array_last(&interpreter->scope_stack);
 
@@ -761,6 +812,11 @@ bool if_handler(TfInterpreter *interpreter) {
     return true;
 }
 
+/*
+ * Marks the current if-block as else.
+ * Toggles the execution flag of the current scope.
+ * Returns false if there is no if-block to toggle.
+ */
 bool else_handler(TfInterpreter *interpreter) {
     TfScope *current_scope = (TfScope*)Array_last(&interpreter->scope_stack);
 
@@ -778,6 +834,10 @@ bool else_handler(TfInterpreter *interpreter) {
     return true;
 }
 
+/*
+ * Pops the scope stack and checks that it was an if or else block.
+ * Returns true if valid, false if there was a mismatch.
+ */
 bool then_handler(TfInterpreter *interpreter) {
     TfScope current_scope;
 
@@ -792,11 +852,19 @@ bool then_handler(TfInterpreter *interpreter) {
     return false;
 }
 
+/*
+ * Prints a newline character.
+ */
 bool cr_handler(TfInterpreter *interpreter) {
     printf("\n");
     return true;
 }
 
+/*
+ * Pops the top element from the result stack.
+ * Drops the element if dest is NULL.
+ * Returns false if the stack is empty.
+ */
 bool drop_handler(TfInterpreter *interpreter) {
     if (!Array_pop(&interpreter->result_stack, NULL)) {
         printf("Result stack underflow.\n");

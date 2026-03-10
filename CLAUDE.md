@@ -58,3 +58,45 @@ make clean
 - **String**: Null-terminated string type with length tracking
 - **TfElement**: Represents parsed tokens (numbers, operators, words, etc.)
 - **TfScope**: Stack management for conditional execution (`if`/`else`/`then`)
+
+## Doc Comment Format
+
+Functions have simple doc comments using the C-style `/* ... */` format:
+
+**Single-line comments** for simple descriptions:
+```c
+/*
+ * Computes a string hash.
+ */
+uint32_t String_hash(char *c_str) {
+```
+
+**Multi-line comments** with parameters and return values:
+```c
+/*
+ * Initializes a Dictionary with the given typeinfo.
+ * The dictionary uses a hash table with power-of-2 sized buckets.
+ * The entry_typeinfo is pinned in place (won't move) to allow safe
+ * access from buckets.
+ * Returns true on success, false on failure.
+ */
+bool Dictionary_init(Dictionary *self, TypeInfo *typeinfo) {
+```
+
+**Multi-line comments with parameters section:**
+```c
+/*
+ * Drops an Array and frees allocated memory.
+ * Parameters:
+ * self: the array to drop
+ * Returns: none (void)
+ */
+void Array_drop(Array *self) {
+```
+
+Key rules:
+- First line is the description
+- Use `* Parameters:` followed by parameter descriptions
+- Use `* Returns:` for return value description
+- Parameters are listed as `* paramname: description`
+- Blank line at start of comment
