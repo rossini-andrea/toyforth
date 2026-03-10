@@ -7,7 +7,7 @@
 
 TypeInfo hash_typeinfo = { .size = sizeof(Hash), .drop = NULL };
 TypeInfo entry_typeinfo = { .size = sizeof(Entry), .drop = NULL };
-TypeInfo array_typeinfo = { .size = sizeof(Array), .drop = Array_drop };
+TypeInfo array_typeinfo = { .size = sizeof(Array), .drop = (DropFunction)Array_drop };
 
 /*
  * malloc wrapper which prevents COW and fragmentation from calling realloc.
@@ -124,7 +124,7 @@ bool Dictionary_init(Dictionary *self, TypeInfo *typeinfo) {
         return false;
     }
 
-    if (!Array_init(&self->entries, self->entry_typeinfo)) {
+    if (!Array_init(&self->entries, &array_typeinfo)) {
         Array_drop(&self->hashes);
         free(self->entry_typeinfo);
         return false;
@@ -133,32 +133,66 @@ bool Dictionary_init(Dictionary *self, TypeInfo *typeinfo) {
     return true;
 }
 
-void* Dictionary_insert(Dictionary *self, String key) {
-    uint32_t key_hash = String_hash(key->c_str);
-
-    Array_foreach((&(self->hashes)), Hash, hash) {
-        if (hash->hash == key_hash) {
-            // TODO: Handle hash conflict
-            goto failure;
+Array *Dictionary_find_hash_slot(Dictionary *self, uint32_t hash) {
+    Array_foreach((&(self->hashes)), Hash, hash_element) {
+        if (hash_element->hash == hash) {
+            return ((Array*)self->entries.data) + hash_element->index;
         }
     }
 
-    Entry *new_entry = Array_push(&self->entries);
+    return NULL;
+}
+
+void* Dictionary_insert(Dictionary *self, String key) {
+    uint32_t key_hash = String_hash(key->c_str);
+    Array *destination_slot = Dictionary_find_hash_slot(self, key_hash);
+
+    if (destination_slot) {
+        for (
+            void *entryptr = destination_slot->data;
+            entryptr < destination_slot->data + destination_slot->len * self->entry_typeinfo->size;
+            entryptr += self->entry_typeinfo->size
+        ) {
+            Entry *entry = entryptr;
+
+            if (
+                entry->key->len == key->len &&
+                strcmp(entry->key->c_str, key->c_str) == 0
+            ) {
+                goto failure;
+            }
+        }
+    }
+
+    if (!destination_slot) {
+        destination_slot = Array_push(&self->entries);
+
+        if (!destination_slot) {
+            goto failure;
+        }
+
+        if (!Array_init(destination_slot, self->entry_typeinfo)) {
+            Array_pop(&self->entries, NULL);
+            goto failure;
+        }
+
+        Hash *new_hash = Array_push(&self->hashes);
+
+        if (!new_hash) {
+            Array_pop(&self->entries, NULL);
+            goto failure;
+        }
+
+        size_t index = destination_slot - (Array*)self->entries.data;
+        new_hash->hash = key_hash;
+        new_hash->index = index;
+    }
+
+    Entry *new_entry = Array_push(destination_slot);
 
     if (!new_entry) {
         goto failure;
     }
-
-    Hash *new_hash = Array_push(&self->hashes);
-
-    if (!new_hash) {
-        Array_pop(&self->entries, NULL);
-        goto failure;
-    }
-
-    size_t index = new_entry - (Entry*)self->entries.data;
-    new_hash->hash = key_hash;
-    new_hash->index = index;
 
     // String is an owned type, so it can be moved
     new_entry->key = key;
@@ -174,10 +208,23 @@ failure:
  */
 void* Dictionary_get(Dictionary *self, char *key) {
     uint32_t key_hash = String_hash(key);
+    Array *slot = Dictionary_find_hash_slot(self, key_hash);
 
-    Array_foreach((&(self->hashes)), Hash, hash) {
-        if (hash->hash == key_hash) {
-            return &(((Entry*)self->entries.data)[hash->index].value);
+    if (!slot) {
+        return NULL;
+    }
+
+    for (
+        void *entryptr = slot->data;
+        entryptr < slot->data + slot->len * self->entry_typeinfo->size;
+        entryptr += self->entry_typeinfo->size
+    ) {
+        Entry *entry = entryptr;
+
+        if (
+            strcmp(entry->key->c_str, key) == 0
+        ) {
+            return &entry->value;
         }
     }
 
@@ -196,16 +243,18 @@ void Dictionary_drop(Dictionary *self) {
     // Entries are custom dropped by the dictionary,
     // as it has knowledge of the underlying type and
     // Entry_drop is not implemented on purpose.
-    for (
-        void *entryptr = self->entries.data;
-        entryptr < self->entries.data + self->entries.len * self->entry_typeinfo->size;
-        entryptr += self->entry_typeinfo->size
-    ) {
-        Entry *entry = (Entry*)entryptr;
-        String_drop(entry->key);
+    Array_foreach(&self->entries, Array, slot) {
+        for (
+            void *entryptr = slot->data;
+            entryptr < slot->data + slot->len * self->entry_typeinfo->size;
+            entryptr += self->entry_typeinfo->size
+        ) {
+            Entry *entry = (Entry*)entryptr;
+            String_drop(entry->key);
 
-        if (self->typeinfo->drop) {
-            self->typeinfo->drop(&entry->value);
+            if (self->typeinfo->drop) {
+                self->typeinfo->drop(&entry->value);
+            }
         }
     }
 
