@@ -12,6 +12,7 @@ ToyForth is an interpreted implementation of the Forth programming language. It'
 - `tf.c` - Main interpreter implementation with parser and interpreter logic
 - `abstractions.c` / `abstractions.h` - Core data structures (Array, Dictionary, String) used throughout the project
 - `test.c` - Basic test suite for core abstractions
+- `makefile` all lowercase - The GNU make build instructions
 
 ### Architecture
 The codebase implements a stack-based interpreter with:
@@ -32,6 +33,16 @@ The project follows a specific memory management approach:
 To build the project:
 ```bash
 make
+```
+
+To build with support for jump labels (preferred):
+```bash
+CFLAGS=-DSTATE_MACHINE_AS_JUMP_LABELS make
+```
+
+If you feel sure TCO will do its magic:
+```bash
+CFLAGS=-DTCO_ACTIVE make
 ```
 
 To run tests:

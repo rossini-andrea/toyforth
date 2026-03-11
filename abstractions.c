@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,6 +9,7 @@
 TypeInfo hash_typeinfo = { .size = sizeof(Hash), .drop = NULL };
 TypeInfo entry_typeinfo = { .size = sizeof(Entry), .drop = NULL };
 TypeInfo array_typeinfo = { .size = sizeof(Array), .drop = (DropFunction)Array_drop };
+TypeInfo char_typeinfo = { .size = sizeof(char), .drop = NULL };
 
 /*
  * malloc wrapper which prevents COW and fragmentation from calling realloc.
@@ -83,6 +85,31 @@ String String_from_slice(char *c_str, size_t len) {
     self->len = len;
 
     return self;
+}
+
+/*
+ * Creates a new String from an Array.
+ * The source Array is moved in the function and considered invalid afterof.
+ *
+ * With proper refactoring this function may just transfer ownership of the
+ * buffer thus preventing a copy.
+ */
+String String_from_array(Array *array) {
+    assert(array->typeinfo->size == 1 &&
+            array->typeinfo->drop == NULL);
+    size_t string_size = array->len + 1 + sizeof(struct String_s);
+    String string = malloc(string_size);
+
+    if (!string) {
+        printf("Out of memory.\n");
+        Array_drop(array);
+    }
+
+    string->len = array->len;
+    memcpy(string->c_str, array->data, array->len);
+    string->c_str[string->len] = '\0';
+    Array_drop(array);
+    return string;
 }
 
 /*

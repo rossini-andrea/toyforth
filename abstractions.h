@@ -1,3 +1,5 @@
+#pragma once
+
 #include <stdint.h>
 #include <stddef.h>
 
@@ -9,6 +11,10 @@ typedef struct {
     DefaultInitFunction default_init;
     DropFunction drop;
 } TypeInfo;
+
+// Provide TypeInfo for common types
+extern TypeInfo array_typeinfo;
+extern TypeInfo char_typeinfo;
 
 typedef struct String_s {
     size_t len;
@@ -52,6 +58,7 @@ typedef struct {
 String String_init(char *c_str);
 String String_copy(String str);
 String String_from_slice(char *c_str, size_t len);
+String String_from_array(Array *array);
 void String_drop(String self);
 uint32_t String_hash(char *c_str);
 
