@@ -145,13 +145,9 @@ bool TfParser_init(TfParser *parser, char *token, size_t linelen) {
  */
 void TfParser_drop(TfParser *parser) {
     Array_drop(&parser->result);
-    // The accumulator union contains an array.
-    // Ideally, we should drop it here and leverage
-    // it has double-free protection. But since
-    // it is in an union, garbage data may lead to
-    // accidental free.
-    // It is better to trust the state machine actions
-    // and review them.
+    /* The accumulator union may hold dynamically allocated arrays.
+     * We cannot safely drop them without knowing which field is active.
+     * Parser actions explicitly drop these when needed. */
 }
 
 // ============================================================================
@@ -209,8 +205,9 @@ bool TfParser_action_string_save(TfParser *parser) {
  * Continues in state machine mode until all tokens are parsed.
  */
 #ifdef STATE_MACHINE_AS_JUMP_LABELS
-bool TfParser_parse(TfParser *parser) { // Open bracket without closing to surround all states 
-    STATE_TRANSFER(TfParser_state_start); // It should be the first but you never know...
+bool TfParser_parse(TfParser *parser) { // Open bracket without closing to surround all states
+    // Jump to first state explicitly.
+    STATE_TRANSFER(TfParser_state_start);
 #else
     bool TfParser_parse(TfParser *parser) { // Dispatcher loop implementation
         while (parser->state_func) {
