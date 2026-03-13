@@ -52,6 +52,8 @@ typedef struct {
  * a: a reference to an Array object
  * t: the type to cast the elements
  * x: iteration control variable
+ * Note:
+ * During iteration items can be modified, but the array MUST NOT be relocated.
  */
 #define Array_foreach(a, t, x) for (t *x = (a)->data; x < (t*)((a)->data) + (a)->len; ++x)
 

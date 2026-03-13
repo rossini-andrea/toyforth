@@ -316,6 +316,9 @@ bool TfParser_parse(TfParser *parser) { // Open bracket without closing to surro
                 String s = String_from_array(&accumulator);
 
                 if (!s) {
+                    // accumulator is consumed on failure
+                    // and success.
+                    // no need to drop it.
                     return false;
                 }
 
@@ -922,8 +925,10 @@ bool dup_handler(TfInterpreter *interpreter) {
 bool if_handler(TfInterpreter *interpreter) {
     TfScope *current_scope = (TfScope*)Array_last(&interpreter->scope_stack);
 
-    // There is always at least one scope
-    assert(current_scope != NULL);
+    if (!current_scope) {
+        printf("Scope stack corrupted.\n");
+        return false;
+    }
 
     bool is_true = false;
 

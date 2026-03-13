@@ -13,6 +13,7 @@ TypeInfo char_typeinfo = { .size = sizeof(char), .drop = NULL };
 
 /*
  * malloc wrapper which prevents COW and fragmentation from calling realloc.
+ * If the new allocation fails, the current allocation is preserved.
  */
 void *remalloc(void *p, size_t current_count, size_t new_count, size_t size) {
     if (size == 0 || new_count == 0 || new_count > SIZE_MAX / size) {
@@ -21,8 +22,8 @@ void *remalloc(void *p, size_t current_count, size_t new_count, size_t size) {
 
     void *new_p = malloc(new_count * size);
 
-    if (new_p) {
-        if (current_count > 0 && p != NULL) {
+    if (new_p && p) {
+        if (current_count > 0) {
             memcpy(new_p, p, current_count * size);
         }
 
