@@ -1,7 +1,6 @@
 # Append my set of CFLAGS
 # Return type is enabled to avoid UB
-# TCO is enabled for avoiding stack overflow in the state machine.
-CFLAGS += -Werror=return-type -foptimize-sibling-calls -Wall -Wextra -O2
+CFLAGS += -Werror=return-type -Wall -Wextra -O2
 
 default: tf
 

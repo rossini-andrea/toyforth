@@ -89,24 +89,14 @@ typedef struct _TfParser {
  * desired implementation options.
  */
 #ifdef STATE_MACHINE_AS_JUMP_LABELS
-#pragma message("Implementing parser as goto labels.")
-#define STATE(s) \
-s:
-#define STATE_TRANSFER(s) \
-    goto s;
+#   pragma message("Implementing parser as goto labels.")
+#   define STATE(s)             s:
+#   define STATE_TRANSFER(s)    goto s;
 #else
-#define STATE(s) \
-    bool s(TfParser *parser)
-#ifdef TCO_ACTIVE
-#pragma message("Implementing parser as tail function calls.")
-#define STATE_TRANSFER(s) \
-    return s(parser);
-#else
-#pragma message("Implementing parser as dispatcher loop.")
-#define STATE_TRANSFER(s) \
-    parser->state_func = s; \
-    return true;
-#endif
+#   pragma message("Implementing parser as dispatcher loop.")
+#   define STATE(s)             bool s(TfParser *parser)
+#   define STATE_TRANSFER(s)    parser->state_func = s; \
+                                return true;
 #endif
 
 #ifndef STATE_MACHINE_AS_JUMP_LABELS
