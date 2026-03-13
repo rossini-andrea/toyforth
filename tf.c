@@ -69,6 +69,10 @@ bool TfElement_is_true(TfElement *self, bool *result) {
 
 TypeInfo tfelement_typeinfo = { .size = sizeof(TfElement), .drop = (DropFunction)TfElement_drop };
 
+// ============================================================================
+// PARSER DEFINITION
+// ============================================================================
+
 /*
  * Holds the parser status.
  */
@@ -81,6 +85,7 @@ typedef struct _TfParser {
     Array /* TfElement */ result;
     union { // this union holds cross state accumulators
         int number_sign;
+        Array string_accumulator;
     };
 } TfParser;
 
@@ -103,6 +108,7 @@ typedef struct _TfParser {
 bool TfParser_state_start(TfParser *parser);
 bool TfParser_state_number(TfParser *parser);
 bool TfParser_state_string(TfParser *parser);
+bool TfParser_state_string_escape(TfParser *parser);
 bool TfParser_state_op(TfParser *parser);
 bool TfParser_state_word(TfParser *parser);
 bool TfParser_state_minus_or_number(TfParser *parser);
@@ -139,8 +145,63 @@ bool TfParser_init(TfParser *parser, char *token, size_t linelen) {
  */
 void TfParser_drop(TfParser *parser) {
     Array_drop(&parser->result);
+    // The accumulator union contains an array.
+    // Ideally, we should drop it here and leverage
+    // it has double-free protection. But since
+    // it is in an union, garbage data may lead to
+    // accidental free.
+    // It is better to trust the state machine actions
+    // and review them.
 }
 
+// ============================================================================
+// PARSER ACTIONS
+// ============================================================================
+
+/*
+ * Pushes a character in the currently active string accumulator.
+ */
+bool TfParser_action_string_accumulate(TfParser *parser, char c) {
+    char *dest = Array_push(&parser->string_accumulator);
+
+    if (!dest) {
+        Array_drop(&parser->string_accumulator);
+        return false;
+    }
+
+    *dest = c;
+    return true;
+}
+
+/*
+ * Saves the currently accumulated string in the result program.
+ */
+bool TfParser_action_string_save(TfParser *parser) {
+    // End of accumulation action
+    String s = String_from_array(&parser->string_accumulator);
+
+    if (!s) {
+        // accumulator is consumed on string creation failure
+        // and success. No need to drop it.
+        return false;
+    }
+
+    TfElement *new_string = Array_push(&parser->result);
+
+    if (!new_string) {
+        String_drop(s);
+        printf("Out of memory.\n");
+        return false;
+    }
+
+    new_string->type = string;
+    new_string->stringvalue = s;
+
+    return true;
+}
+
+// ============================================================================
+// PARSER IMPLEMENTATION
 // ============================================================================
 
 /*
@@ -178,7 +239,7 @@ bool TfParser_parse(TfParser *parser) { // Open bracket without closing to surro
                 STATE_TRANSFER(TfParser_state_word);
             }
             if (isdigit(*parser->token)) {
-                // Accumulate positive sign and transfer state
+                // Action: accumulate positive sign and transfer state
                 parser->number_sign = 1;
                 STATE_TRANSFER(TfParser_state_number);
             }
@@ -198,6 +259,11 @@ bool TfParser_parse(TfParser *parser) { // Open bracket without closing to surro
                 STATE_TRANSFER(TfParser_state_gt);
             }
             if (*parser->token == '"') {
+                // Action: start accumulator
+                if (!Array_init(&parser->string_accumulator, &char_typeinfo)) {
+                    return false;
+                }
+
                 STATE_TRANSFER(TfParser_state_string);
             }
             if (strchr("+*/", *parser->token)) {
@@ -289,55 +355,65 @@ bool TfParser_parse(TfParser *parser) { // Open bracket without closing to surro
      * Parses a string.
      */
     STATE(TfParser_state_string) {
-        Array accumulator;
-
-        if (!Array_init(&accumulator, &char_typeinfo)) {
-            return false;
-        }
-
         for (++parser->token;
                 parser->token != parser->end &&
                 *parser->token;
                 ++parser->token) {
             char tok = *parser->token;
 
+            if (tok == '\\') {
+                STATE_TRANSFER(TfParser_state_string_escape);
+            }
+
             if (tok == '"') {
-                // End of accumulation action
-                String s = String_from_array(&accumulator);
-
-                if (!s) {
-                    // accumulator is consumed on failure
-                    // and success.
-                    // no need to drop it.
+                if (!TfParser_action_string_save(parser)) {
                     return false;
                 }
-
-                TfElement *new_string = Array_push(&parser->result);
-
-                if (!new_string) {
-                    String_drop(s);
-                    printf("Out of memory.\n");
-                    return false;
-                }
-
-                new_string->type = string;
-                new_string->stringvalue = s;
 
                 STATE_TRANSFER(TfParser_state_start);
             }
 
-            char *dest = Array_push(&accumulator);
-
-            if (!dest) {
-                Array_drop(&accumulator);
+            if (!TfParser_action_string_accumulate(parser, tok)) {
                 return false;
             }
-
-            *dest = tok;
         }
 
         printf("Unexpected end of line.\n");
-        Array_drop(&accumulator);
+        Array_drop(&parser->string_accumulator);
+        return false;
+    }
+
+    /*
+     * Parses a string escape sequence found in a string
+     */
+    STATE(TfParser_state_string_escape) {
+        for (++parser->token;
+                parser->token != parser->end &&
+                *parser->token;
+                ++parser->token) {
+            char tok = *parser->token;
+            char out_char;
+
+            switch (tok) {
+                case '\\':
+                case '\"':
+                    out_char = tok;
+                    break;
+                default:
+                    printf("Unexpected token %c.\n", tok);
+                    Array_drop(&parser->string_accumulator);
+                    return false;
+            }
+
+            if (!TfParser_action_string_accumulate(parser, out_char)) {
+                return false;
+            }
+             
+            STATE_TRANSFER(TfParser_state_string);
+        }
+
+        printf("Unexpected end of line.\n");
+        Array_drop(&parser->string_accumulator);
         return false;
     }
 
@@ -1048,7 +1124,7 @@ int main(int argc, char *argv[]) {
 
         fflush(stdout);
 
-        if ((linelen = getline(&line, &linesize, stdin)) < 0) {
+        if ((linelen = getline(&line, &linesize, stdin) - 1) < 0) {
             break;
         }
 
