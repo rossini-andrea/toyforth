@@ -986,7 +986,7 @@ bool dup_handler(TfInterpreter *interpreter) {
  * Returns false if no boolean value is on the stack.
  */
 bool if_handler(TfInterpreter *interpreter) {
-    TfScope *current_scope = (TfScope*)Array_last(&interpreter->scope_stack);
+    TfScope *current_scope = Array_last(&interpreter->scope_stack);
 
     if (!current_scope) {
         printf("Scope stack corrupted.\n");
@@ -996,12 +996,16 @@ bool if_handler(TfInterpreter *interpreter) {
     bool is_true = false;
 
     if (current_scope->execution_flag) {
-        TfElement *controlvalue = (TfElement*)Array_last(&interpreter->result_stack);
+        TfElement controlvalue;
+        bool pop = Array_pop(&interpreter->result_stack, &controlvalue);
 
-        if (!controlvalue || !TfElement_is_true(controlvalue, &is_true)) {
+        if (!pop || !TfElement_is_true(&controlvalue, &is_true)) {
+            TfElement_drop(&controlvalue);
             printf("No boolean data on the stack.\n");
             return false;
         }
+
+        TfElement_drop(&controlvalue);
     }
 
     // Don't use current_scope variable after this point
