@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,14 +65,16 @@ bool TfElement_is_true(TfElement *self, bool *result) {
         case character: *result = self->charvalue; return true;
         default: return false;
     }
-
-    return false;
 }
 
 TypeInfo tfelement_typeinfo = { .size = sizeof(TfElement), .drop = (DropFunction)TfElement_drop };
 
+/*
+ * Holds the parser status.
+ */
 typedef struct _TfParser {
     char *token;
+    char *end;
 #ifndef STATE_MACHINE_AS_JUMP_LABELS
     bool (*state_func)(struct _TfParser *);
 #endif
@@ -81,24 +84,28 @@ typedef struct _TfParser {
     };
 } TfParser;
 
+/*
+ * Build the state machine DSL based one the
+ * desired implementation options.
+ */
 #ifdef STATE_MACHINE_AS_JUMP_LABELS
-    #pragma message("Implementing parser as goto labels.")
-    #define STATE(s) \
+#pragma message("Implementing parser as goto labels.")
+#define STATE(s) \
 s:
-    #define STATE_TRANSFER(s) \
-        goto s;
+#define STATE_TRANSFER(s) \
+    goto s;
 #else
-    #define STATE(s) \
-        bool s(TfParser *parser)
+#define STATE(s) \
+    bool s(TfParser *parser)
 #ifdef TCO_ACTIVE
-    #pragma message("Implementing parser as tail function calls.")
-    #define STATE_TRANSFER(s) \
-        return s(parser);
+#pragma message("Implementing parser as tail function calls.")
+#define STATE_TRANSFER(s) \
+    return s(parser);
 #else
-    #pragma message("Implementing parser as dispatcher loop.")
-    #define STATE_TRANSFER(s) \
-        parser->state_func = s; \
-        return true;
+#pragma message("Implementing parser as dispatcher loop.")
+#define STATE_TRANSFER(s) \
+    parser->state_func = s; \
+    return true;
 #endif
 #endif
 
@@ -117,9 +124,19 @@ bool TfParser_state_gt(TfParser *parser);
 bool TfParser_state_gte(TfParser *parser);
 #endif
 
-bool TfParser_init(TfParser *parser, char *token) {
-    parser->token = token - 1; // Begin before the buffer.
-                               // So start state can jump right into it.
+/*
+ * Initializes the parser.
+ * Parameters:
+ * * parser: the parser to initialize.
+ * * token: the starting position of a string to parse.
+ * Returns true on success, false on failure.
+ */
+bool TfParser_init(TfParser *parser, char *token, size_t linelen) {
+    // Begin before the buffer. It selects a garbage
+    // memory location, but safety is guaranteed by the parser loop
+    // always fetching the next byte - expecially start state.
+    parser->token = token - 1;
+    parser->end = token + linelen;
 #ifndef STATE_MACHINE_AS_JUMP_LABELS
     parser->state_func = TfParser_state_start;
 #endif
@@ -141,423 +158,463 @@ void TfParser_drop(TfParser *parser) {
  * Continues in state machine mode until all tokens are parsed.
  */
 #ifdef STATE_MACHINE_AS_JUMP_LABELS
-bool TfParser_parse(TfParser *parser) { // Open bracket to surround all states 
+bool TfParser_parse(TfParser *parser) { // Open bracket without closing to surround all states 
     STATE_TRANSFER(TfParser_state_start); // It should be the first but you never know...
 #else
-bool TfParser_parse(TfParser *parser) { // Dispatcher loop implementation
-    while (parser->state_func) {
-        if (!parser->state_func(parser)) {
-            return false;
+    bool TfParser_parse(TfParser *parser) { // Dispatcher loop implementation
+        while (parser->state_func) {
+            if (!parser->state_func(parser)) {
+                return false;
+            }
         }
-    }
 
-    return true;
-}
+        return true;
+    }
 #endif
 
-/*
- * The start state of the parser.
- * Dispatches to appropriate state based on the first character.
- */
-STATE(TfParser_state_start) {
-    for (++parser->token; *parser->token; ++parser->token) {
-        if (isspace(*parser->token)) {
-            continue;
+    /*
+     * The start state of the parser.
+     * Dispatches to appropriate state based on the first character.
+     */
+    STATE(TfParser_state_start) {
+        for (++parser->token;
+                parser->token != parser->end &&
+                *parser->token;
+                ++parser->token) {
+            if (isspace(*parser->token)) {
+                continue;
+            }
+            if (isalpha(*parser->token)) {
+                STATE_TRANSFER(TfParser_state_word);
+            }
+            if (isdigit(*parser->token)) {
+                // Accumulate positive sign and transfer state
+                parser->number_sign = 1;
+                STATE_TRANSFER(TfParser_state_number);
+            }
+            if (*parser->token == '-') {
+                STATE_TRANSFER(TfParser_state_minus_or_number);
+            }
+            if (*parser->token == '.') {
+                STATE_TRANSFER(TfParser_state_print);
+            }
+            if (*parser->token == '=') {
+                STATE_TRANSFER(TfParser_state_equals);
+            }
+            if (*parser->token == '<') {
+                STATE_TRANSFER(TfParser_state_lt);
+            }
+            if (*parser->token == '>') {
+                STATE_TRANSFER(TfParser_state_gt);
+            }
+            if (*parser->token == '"') {
+                STATE_TRANSFER(TfParser_state_string);
+            }
+            if (strchr("+*/", *parser->token)) {
+                STATE_TRANSFER(TfParser_state_op);
+            }
         }
-        if (isalpha(*parser->token)) {
-            STATE_TRANSFER(TfParser_state_word);
-        }
-        if (isdigit(*parser->token)) {
-            // Accumulate positive sign and transfer state
-            parser->number_sign = 1;
-            STATE_TRANSFER(TfParser_state_number);
-        }
-        if (*parser->token == '-') {
-            STATE_TRANSFER(TfParser_state_minus_or_number);
-        }
-        if (*parser->token == '.') {
-            STATE_TRANSFER(TfParser_state_print);
-        }
-        if (*parser->token == '=') {
-            STATE_TRANSFER(TfParser_state_equals);
-        }
-        if (*parser->token == '<') {
-            STATE_TRANSFER(TfParser_state_lt);
-        }
-        if (*parser->token == '>') {
-            STATE_TRANSFER(TfParser_state_gt);
-        }
-        if (*parser->token == '"') {
-            STATE_TRANSFER(TfParser_state_string);
-        }
-        if (strchr("+*/", *parser->token)) {
-            STATE_TRANSFER(TfParser_state_op);
-        }
-    }
 
 #ifndef STATE_MACHINE_AS_JUMP_LABELS
-    parser->state_func = NULL;
+        parser->state_func = NULL;
 #endif
-    return true;
-}
-
-/*
- * Parses a number.
- */
-STATE(TfParser_state_number) {
-    int accum = *parser->token - '0';
-
-    for (++parser->token; *parser->token; ++parser->token) {
-        /* if space or implicitly, end of parsing, add number to result */
-        if (isspace(*parser->token)) {
-            break;
-        }
-
-        /* if digit accumulate */
-        if (isdigit(*parser->token)) {
-            accum = accum * 10 + *parser->token - '0';
-            continue;
-        }
-
-        /* everything else is an error */
-        printf("Error at %c.\n", *parser->token);
-        return false;
+        return true;
     }
 
-    TfElement *new_number = Array_push(&parser->result);
+    /*
+     * Parses a number.
+     */
+    STATE(TfParser_state_number) {
+        int accum = *parser->token - '0';
 
-    if (!new_number) {
-        printf("Out of memory.\n");
-        return false;
-    }
-
-    new_number->type = number;
-    new_number->numbervalue = accum * parser->number_sign;
-
-    STATE_TRANSFER(TfParser_state_start);
-}
-
-/*
- * Parses an operator.
- */
-STATE(TfParser_state_op) {
-    char op = *parser->token;
-
-    for (++parser->token; *parser->token; ++parser->token) {
-        /* if space or implicitly, end of parsing, it was an operator */
-        if (isspace(*parser->token)) {
-            break;
-        }
-
-        /* everything else is an error */
-        printf("Error at %c.\n", *parser->token);
-        return false;
-    }
-
-    TfElement *new_op = Array_push(&parser->result);
-
-    if (!new_op) {
-        printf("Out of memory.\n");
-        return false;
-    }
-
-    new_op->type =
-        op == '+' ? plus_op :
-        op == '*' ? mul_op :
-        op == '/' ? div_op : minus_op;
-
-    STATE_TRANSFER(TfParser_state_start);
-}
-
-/*
- * Parses a string.
- */
-STATE(TfParser_state_string) {
-    Array accumulator;
-
-    if (!Array_init(&accumulator, &char_typeinfo)) {
-        return false;
-    }
-
-    for (++parser->token; *parser->token; ++parser->token) {
-        char tok = *parser->token;
-
-        if (tok == '"') {
-            // End of accumulation action
-            String s = String_from_array(&accumulator);
-
-            if (!s) {
-                return false;
+        for (++parser->token;
+                parser->token != parser->end &&
+                *parser->token;
+                ++parser->token) {
+            /* if space or implicitly, end of parsing, add number to result */
+            if (isspace(*parser->token)) {
+                break;
             }
 
-            TfElement *new_string = Array_push(&parser->result);
-
-            if (!new_string) {
-                printf("Out of memory.\n");
-                return false;
+            /* if digit accumulate */
+            if (isdigit(*parser->token)) {
+                accum = accum * 10 + *parser->token - '0';
+                continue;
             }
 
-            new_string->type = string;
-            new_string->stringvalue = s;
-
-            STATE_TRANSFER(TfParser_state_start);
-        }
-
-        char *dest = Array_push(&accumulator);
-
-        if (!dest) {
-            Array_drop(&accumulator);
+            /* everything else is an error */
+            printf("Error at %c.\n", *parser->token);
             return false;
         }
 
-        *dest = tok;
-    }
+        TfElement *new_number = Array_push(&parser->result);
 
-    printf("Unexpected end of line.\n");
-    Array_drop(&accumulator);
-    return false;
-}
-
-/*
- * Parses the equals sign.
- */
-STATE(TfParser_state_equals) {
-    for (++parser->token; *parser->token; ++parser->token) {
-        /* if space or implicitly, end of parsing, it was equality operator */
-        if (isspace(*parser->token)) {
-            break;
+        if (!new_number) {
+            printf("Out of memory.\n");
+            return false;
         }
 
-        /* everything else is an error - for now */
-        printf("Error at %c.\n", *parser->token);
-        return false;
+        new_number->type = number;
+        new_number->numbervalue = accum * parser->number_sign;
+
+        STATE_TRANSFER(TfParser_state_start);
     }
 
-    TfElement *new_op = Array_push(&parser->result);
+    /*
+     * Parses an operator.
+     */
+    STATE(TfParser_state_op) {
+        char op = *parser->token;
 
-    if (!new_op) {
-        printf("Out of memory.\n");
-        return false;
-    }
+        for (++parser->token;
+                parser->token != parser->end &&
+                *parser->token;
+                ++parser->token) {
+            /* if space or implicitly, end of parsing, it was an operator */
+            if (isspace(*parser->token)) {
+                break;
+            }
 
-    new_op->type = eq_op;
-    STATE_TRANSFER(TfParser_state_start);
-}
-
-/*
- * Parses the "<" sign.
- */
-STATE(TfParser_state_lt) {
-    for (++parser->token; *parser->token; ++parser->token) {
-        /* if space or implicitly, end of parsing, it was less than operator */
-        if (isspace(*parser->token)) {
-            break;
+            /* everything else is an error */
+            printf("Error at %c.\n", *parser->token);
+            return false;
         }
 
-        if (*parser->token == '=') {
-            STATE_TRANSFER(TfParser_state_lte);
-            return true;
+        TfElement *new_op = Array_push(&parser->result);
+
+        if (!new_op) {
+            printf("Out of memory.\n");
+            return false;
         }
 
-        /* everything else is an error - for now */
-        printf("Error at %c.\n", *parser->token);
-        return false;
+        new_op->type =
+            op == '+' ? plus_op :
+            op == '*' ? mul_op :
+            op == '/' ? div_op : minus_op;
+
+        STATE_TRANSFER(TfParser_state_start);
     }
 
-    TfElement *new_op = Array_push(&parser->result);
+    /*
+     * Parses a string.
+     */
+    STATE(TfParser_state_string) {
+        Array accumulator;
 
-    if (!new_op) {
-        printf("Out of memory.\n");
-        return false;
-    }
-
-    new_op->type = lt_op;
-    STATE_TRANSFER(TfParser_state_start);
-}
-
-/*
- * Parses an "=" found after the "<" sign.
- */
-STATE(TfParser_state_lte) {
-    for (++parser->token; *parser->token; ++parser->token) {
-        /* if space or implicitly, end of parsing, it was less than equal operator */
-        if (isspace(*parser->token)) {
-            break;
+        if (!Array_init(&accumulator, &char_typeinfo)) {
+            return false;
         }
 
-        /* everything else is an error */
-        printf("Error at %c.\n", *parser->token);
-        return false;
-    }
+        for (++parser->token;
+                parser->token != parser->end &&
+                *parser->token;
+                ++parser->token) {
+            char tok = *parser->token;
 
-    TfElement *new_op = Array_push(&parser->result);
+            if (tok == '"') {
+                // End of accumulation action
+                String s = String_from_array(&accumulator);
 
-    if (!new_op) {
-        printf("Out of memory.\n");
-        return false;
-    }
+                if (!s) {
+                    return false;
+                }
 
-    new_op->type = lte_op;
-    STATE_TRANSFER(TfParser_state_start);
-}
+                TfElement *new_string = Array_push(&parser->result);
 
-/*
- * Parses the ">" sign.
- */
-STATE(TfParser_state_gt) {
-    for (++parser->token; *parser->token; ++parser->token) {
-        /* if space or implicitly, end of parsing, it was less than operator */
-        if (isspace(*parser->token)) {
-            break;
+                if (!new_string) {
+                    String_drop(s);
+                    printf("Out of memory.\n");
+                    return false;
+                }
+
+                new_string->type = string;
+                new_string->stringvalue = s;
+
+                STATE_TRANSFER(TfParser_state_start);
+            }
+
+            char *dest = Array_push(&accumulator);
+
+            if (!dest) {
+                Array_drop(&accumulator);
+                return false;
+            }
+
+            *dest = tok;
         }
 
-        if (*parser->token == '=') {
-            STATE_TRANSFER(TfParser_state_gte);
-            return true;
+        printf("Unexpected end of line.\n");
+        Array_drop(&accumulator);
+        return false;
+    }
+
+    /*
+     * Parses the equals sign.
+     */
+    STATE(TfParser_state_equals) {
+        for (++parser->token;
+                parser->token != parser->end &&
+                *parser->token;
+                ++parser->token) {
+            /* if space or implicitly, end of parsing, it was equality operator */
+            if (isspace(*parser->token)) {
+                break;
+            }
+
+            /* everything else is an error - for now */
+            printf("Error at %c.\n", *parser->token);
+            return false;
         }
 
-        /* everything else is an error - for now */
-        printf("Error at %c.\n", *parser->token);
-        return false;
-    }
+        TfElement *new_op = Array_push(&parser->result);
 
-    TfElement *new_op = Array_push(&parser->result);
-
-    if (!new_op) {
-        printf("Out of memory.\n");
-        return false;
-    }
-
-    new_op->type = gt_op;
-    STATE_TRANSFER(TfParser_state_start);
-}
-
-/*
- * Parses an "=" found after the ">" sign.
- */
-STATE(TfParser_state_gte) {
-    for (++parser->token; *parser->token; ++parser->token) {
-        /* if space or implicitly, end of parsing, it was less than equal operator */
-        if (isspace(*parser->token)) {
-            break;
+        if (!new_op) {
+            printf("Out of memory.\n");
+            return false;
         }
 
-        /* everything else is an error */
-        printf("Error at %c.\n", *parser->token);
-        return false;
+        new_op->type = eq_op;
+        STATE_TRANSFER(TfParser_state_start);
     }
 
-    TfElement *new_op = Array_push(&parser->result);
+    /*
+     * Parses the "<" sign.
+     */
+    STATE(TfParser_state_lt) {
+        for (++parser->token;
+                parser->token != parser->end &&
+                *parser->token;
+                ++parser->token) {
+            /* if space or implicitly, end of parsing, it was less than operator */
+            if (isspace(*parser->token)) {
+                break;
+            }
 
-    if (!new_op) {
-        printf("Out of memory.\n");
-        return false;
-    }
+            if (*parser->token == '=') {
+                STATE_TRANSFER(TfParser_state_lte);
+                return true;
+            }
 
-    new_op->type = gte_op;
-    STATE_TRANSFER(TfParser_state_start);
-}
-/*
- * Parses a print command or starting with '.'.
- */
-STATE(TfParser_state_print) {
-    for (++parser->token; *parser->token; ++parser->token) {
-        /* if space or implicitly, end of parsing, it was a print */
-        if (isspace(*parser->token)) {
-            break;
+            /* everything else is an error - for now */
+            printf("Error at %c.\n", *parser->token);
+            return false;
         }
 
-        /* everything else is an error - for now */
-        printf("Error at %c.\n", *parser->token);
-        return false;
-    }
+        TfElement *new_op = Array_push(&parser->result);
 
-    TfElement *new_print = Array_push(&parser->result);
-
-    if (!new_print) {
-        printf("Out of memory.\n");
-        return false;
-    }
-
-    new_print->type = command_print;
-    STATE_TRANSFER(TfParser_state_start);
-}
-
-/*
- * Parses a minus op or a negative number.
- */
-STATE(TfParser_state_minus_or_number) {
-    for (++parser->token; *parser->token; ++parser->token) {
-        /* if space, or end of parsing it was a minus sign */
-        if (isspace(*parser->token)) {
-           break;
+        if (!new_op) {
+            printf("Out of memory.\n");
+            return false;
         }
 
-        /* if a digit is found, parse as a negative number*/
-        if (isdigit(*parser->token)) {
-            // Accumulate negative sign and transfer state
-            parser->number_sign = -1;
-            STATE_TRANSFER(TfParser_state_number);
+        new_op->type = lt_op;
+        STATE_TRANSFER(TfParser_state_start);
+    }
+
+    /*
+     * Parses an "=" found after the "<" sign.
+     */
+    STATE(TfParser_state_lte) {
+        for (++parser->token;
+                parser->token != parser->end &&
+                *parser->token;
+                ++parser->token) {
+            /* if space or implicitly, end of parsing, it was less than equal operator */
+            if (isspace(*parser->token)) {
+                break;
+            }
+
+            /* everything else is an error */
+            printf("Error at %c.\n", *parser->token);
+            return false;
         }
 
-        /* everything else is an error */
-        printf("Error at %c.\n", *parser->token);
-        return false;
-    }
+        TfElement *new_op = Array_push(&parser->result);
 
-    TfElement *new_minus = Array_push(&parser->result);
-
-    if (!new_minus) {
-        printf("Out of memory.\n");
-        return false;
-    }
-
-    new_minus->type = minus_op;
-    STATE_TRANSFER(TfParser_state_start);
-}
-
-/*
- * Parses a word. Appends it to the result array if successful.
- * Returns false on error.
- */
-STATE(TfParser_state_word) {
-    char *start = parser->token;
-
-    for (++parser->token; *parser->token; ++parser->token) {
-        /* if alphanumeric, silently accumulate */
-        if (isalnum(*parser->token)) {
-            continue;
+        if (!new_op) {
+            printf("Out of memory.\n");
+            return false;
         }
 
-        /* if space or implicitly, end of parsing, add word to result */
-        if (isspace(*parser->token)) {
-            break;
+        new_op->type = lte_op;
+        STATE_TRANSFER(TfParser_state_start);
+    }
+
+    /*
+     * Parses the ">" sign.
+     */
+    STATE(TfParser_state_gt) {
+        for (++parser->token;
+                parser->token != parser->end &&
+                *parser->token;
+                ++parser->token) {
+            /* if space or implicitly, end of parsing, it was less than operator */
+            if (isspace(*parser->token)) {
+                break;
+            }
+
+            if (*parser->token == '=') {
+                STATE_TRANSFER(TfParser_state_gte);
+                return true;
+            }
+
+            /* everything else is an error - for now */
+            printf("Error at %c.\n", *parser->token);
+            return false;
         }
 
-        /* everything else is an error */
-        printf("Error at %c.\n", *parser->token);
-        return false;
+        TfElement *new_op = Array_push(&parser->result);
+
+        if (!new_op) {
+            printf("Out of memory.\n");
+            return false;
+        }
+
+        new_op->type = gt_op;
+        STATE_TRANSFER(TfParser_state_start);
     }
 
-    size_t len = parser->token - start;
+    /*
+     * Parses an "=" found after the ">" sign.
+     */
+    STATE(TfParser_state_gte) {
+        for (++parser->token;
+                parser->token != parser->end &&
+                *parser->token;
+                ++parser->token) {
+            /* if space or implicitly, end of parsing, it was less than equal operator */
+            if (isspace(*parser->token)) {
+                break;
+            }
 
-    TfElement *new_word = Array_push(&parser->result);
+            /* everything else is an error */
+            printf("Error at %c.\n", *parser->token);
+            return false;
+        }
 
-    if (!new_word) {
-        printf("Out of memory.\n");
-        return false;
+        TfElement *new_op = Array_push(&parser->result);
+
+        if (!new_op) {
+            printf("Out of memory.\n");
+            return false;
+        }
+
+        new_op->type = gte_op;
+        STATE_TRANSFER(TfParser_state_start);
+    }
+    /*
+     * Parses a print command or starting with '.'.
+     */
+    STATE(TfParser_state_print) {
+        for (++parser->token;
+                parser->token != parser->end &&
+                *parser->token;
+                ++parser->token) {
+            /* if space or implicitly, end of parsing, it was a print */
+            if (isspace(*parser->token)) {
+                break;
+            }
+
+            /* everything else is an error - for now */
+            printf("Error at %c.\n", *parser->token);
+            return false;
+        }
+
+        TfElement *new_print = Array_push(&parser->result);
+
+        if (!new_print) {
+            printf("Out of memory.\n");
+            return false;
+        }
+
+        new_print->type = command_print;
+        STATE_TRANSFER(TfParser_state_start);
     }
 
-    new_word->type = word;
-    new_word->wordname = String_from_slice(start, len);
+    /*
+     * Parses a minus op or a negative number.
+     */
+    STATE(TfParser_state_minus_or_number) {
+        for (++parser->token;
+                parser->token != parser->end &&
+                *parser->token;
+                ++parser->token) {
+            /* if space, or end of parsing it was a minus sign */
+            if (isspace(*parser->token)) {
+                break;
+            }
 
-    if (!new_word->wordname) {
-        printf("Out of memory.\n");
-        return false;
+            /* if a digit is found, parse as a negative number*/
+            if (isdigit(*parser->token)) {
+                // Accumulate negative sign and transfer state
+                parser->number_sign = -1;
+                STATE_TRANSFER(TfParser_state_number);
+            }
+
+            /* everything else is an error */
+            printf("Error at %c.\n", *parser->token);
+            return false;
+        }
+
+        TfElement *new_minus = Array_push(&parser->result);
+
+        if (!new_minus) {
+            printf("Out of memory.\n");
+            return false;
+        }
+
+        new_minus->type = minus_op;
+        STATE_TRANSFER(TfParser_state_start);
     }
 
-    STATE_TRANSFER(TfParser_state_start);
-}
+    /*
+     * Parses a word. Appends it to the result array if successful.
+     * Returns false on error.
+     */
+    STATE(TfParser_state_word) {
+        char *start = parser->token;
+
+        for (++parser->token;
+                parser->token != parser->end &&
+                *parser->token;
+                ++parser->token) {
+            /* if alphanumeric, silently accumulate */
+            if (isalnum(*parser->token)) {
+                continue;
+            }
+
+            /* if space or implicitly, end of parsing, add word to result */
+            if (isspace(*parser->token)) {
+                break;
+            }
+
+            /* everything else is an error */
+            printf("Error at %c.\n", *parser->token);
+            return false;
+        }
+
+        size_t len = parser->token - start;
+
+        TfElement *new_word = Array_push(&parser->result);
+
+        if (!new_word) {
+            printf("Out of memory.\n");
+            return false;
+        }
+
+        String s = String_from_slice(start, len);
+
+        if (!s) {
+            Array_pop(&parser->result, NULL);
+            printf("Out of memory.\n");
+            return false;
+        }
+
+        new_word->type = word;
+        new_word->wordname = s;
+
+        STATE_TRANSFER(TfParser_state_start);
+    }
 
 #ifdef STATE_MACHINE_AS_JUMP_LABELS
 } // End of state machine
@@ -697,8 +754,14 @@ void run_line(Array *program) {
                         goto cleanup;
                     }
 
+                    String copy = String_copy(prog_element->stringvalue);
+
+                    if (!copy) {
+                        goto cleanup;
+                    }
+
                     dest_s->type = prog_element->type;
-                    dest_s->stringvalue = String_copy(prog_element->stringvalue);
+                    dest_s->stringvalue = copy;
 
                     break;
                 case plus_op:
@@ -782,10 +845,10 @@ void run_line(Array *program) {
                     break;
                 case word:
                     WordHandler *handler = Dictionary_get(
-                        &words,
-                        prog_element->wordname->c_str
-                    );
-                    
+                            &words,
+                            prog_element->wordname->c_str
+                            );
+
                     if (!handler) {
                         printf("Undefined word `%s`.\n", prog_element->wordname->c_str);
                         goto cleanup;
@@ -802,9 +865,9 @@ void run_line(Array *program) {
             }
         } else if(prog_element->type == word) {
             WordHandler *handler = Dictionary_get(
-                &words,
-                prog_element->wordname->c_str
-            );
+                    &words,
+                    prog_element->wordname->c_str
+                    );
 
             if (!handler) {
                 printf(
@@ -873,7 +936,8 @@ bool if_handler(TfInterpreter *interpreter) {
         }
     }
 
-    // current_scope may become invalid after this point
+    // Don't use current_scope variable after this point
+    // since the array may relocate.
 
     TfScope *new_scope = (TfScope*)Array_push(&interpreter->scope_stack);
 
@@ -959,29 +1023,29 @@ int main(int argc, char *argv[]) {
     }
 
     WordHandler *h = Dictionary_insert(&words, String_init("if"));
-        h->exec_always = true;
-        h->func = if_handler;
+    h->exec_always = true;
+    h->func = if_handler;
     h = Dictionary_insert(&words, String_init("else"));
-        h->exec_always = true;
-        h->func = else_handler;
+    h->exec_always = true;
+    h->func = else_handler;
     h = Dictionary_insert(&words, String_init("then"));
-        h->exec_always = true;
-        h->func = then_handler;
+    h->exec_always = true;
+    h->func = then_handler;
     h = Dictionary_insert(&words, String_init("cr"));
-        h->exec_always = false;
-        h->func = cr_handler;
+    h->exec_always = false;
+    h->func = cr_handler;
     h = Dictionary_insert(&words, String_init("dup"));
-        h->exec_always = false;
-        h->func = dup_handler;
+    h->exec_always = false;
+    h->func = dup_handler;
     h = Dictionary_insert(&words, String_init("drop"));
-        h->exec_always = false;
-        h->func = drop_handler;
+    h->exec_always = false;
+    h->func = drop_handler;
 
     bool istty = isatty(fileno(stdin));
 
     while (1) {
         char *line = NULL;
-        size_t linelen;
+        size_t linelen, linesize;
 
         if (istty) {
             printf("tf> ");
@@ -989,12 +1053,12 @@ int main(int argc, char *argv[]) {
 
         fflush(stdout);
 
-        if (getline(&line, &linelen, stdin) < 0) {
+        if ((linelen = getline(&line, &linesize, stdin)) < 0) {
             break;
         }
 
         TfParser line_parser;
-        TfParser_init(&line_parser, line);
+        TfParser_init(&line_parser, line, linelen);
         TfParser_parse(&line_parser);
 
         run_line(&line_parser.result);

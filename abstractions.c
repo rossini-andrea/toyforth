@@ -103,6 +103,7 @@ String String_from_array(Array *array) {
     if (!string) {
         printf("Out of memory.\n");
         Array_drop(array);
+        return NULL;
     }
 
     string->len = array->len;
@@ -195,6 +196,8 @@ failure:
  * Uses the bucket_mask to compute the bucket index.
  */
 Array *Dictionary_find_hash_bucket(Dictionary *self, uint32_t hash) {
+    assert(self->bucket_mask == self->buckets.len - 1);
+
     if (!self->buckets.data) {
         return NULL;
     }
@@ -252,6 +255,10 @@ failure:
  * The key is borrowed (not moved).
  */
 void* Dictionary_get(Dictionary *self, char *key) {
+    if (key == NULL) {
+        return NULL;
+    }
+
     uint32_t key_hash = String_hash(key);
     Array *destination_bucket = Dictionary_find_hash_bucket(self, key_hash);
 
