@@ -688,18 +688,27 @@ bool TfParser_parse(TfParser *parser) { // Open bracket without closing to surro
 // ===========================================================================
 
 /*
- * Represents the type of a scope (normal, if, else).
- * Used for conditional execution in Forth.
+ * Represents the type of a scope (normal, or a control structure).
+ * Used for resolving labels in Forth.
  */
 typedef enum {
     NORMAL,
     IF,
     ELSE,
+    DO
 } ScopeType;
 
 typedef struct {
     ScopeType type;
     bool execution_flag;
+
+    union {
+        struct {
+            size_t do_label;
+            int index;
+            int limit;
+        } loop_control;
+    };
 } TfScope;
 
 TypeInfo tfscope_typeinfo = { .size = sizeof(TfScope), .drop = NULL };
@@ -707,6 +716,7 @@ TypeInfo tfscope_typeinfo = { .size = sizeof(TfScope), .drop = NULL };
 typedef struct {
     Array /* TfElement */ result_stack;
     Array /* TfScope */ scope_stack;
+    size_t program_counter;
 } TfInterpreter;
 
 typedef bool (*WordHandlerFunc)(TfInterpreter *interpreter);
@@ -741,6 +751,7 @@ bool TfInterpreter_init(TfInterpreter *self) {
 
     scope->type = NORMAL;
     scope->execution_flag = true;
+    self->program_counter = 0;
 
     return true;
 }
@@ -786,7 +797,7 @@ Dictionary words;
 /*
  * Executes a parsed program.
  * Initializes an interpreter and runs each element in the program.
- * Handles numbers, operators, and Forth words (if, else, then, cr, dup, drop).
+ * Handles numbers, operators, and Forth words.
  */
 void run_line(Array *program) {
     TfInterpreter interpreter;
@@ -795,7 +806,15 @@ void run_line(Array *program) {
         return;
     }
 
-    Array_foreach (program, TfElement, prog_element) {
+    while (true) {
+        TfElement *prog_element = Array_at(program, interpreter.program_counter);
+
+        if (!prog_element) {
+            break;
+        }
+
+        ++interpreter.program_counter;
+
         if (((TfScope*)Array_last(&interpreter.scope_stack))->execution_flag) {
             TfElement a, b;
 
@@ -1086,6 +1105,105 @@ bool drop_handler(TfInterpreter *interpreter) {
     return true;
 }
 
+/*
+ * When execution is enabled, checks for the presence of 2 numeric elements on
+ * the result stack.
+ * If everything succeeds places a DO scope on the execution stack.
+ */
+bool do_handler(TfInterpreter *interpreter) {
+    TfScope *current_scope = Array_last(&interpreter->scope_stack);
+
+    if (!current_scope) {
+        printf("Scope stack corrupted.\n");
+        return false;
+    }
+
+    bool execution_flag = current_scope->execution_flag;
+    int i = 0;
+    int l = 0;
+
+    if (execution_flag) {
+        // Fetch the control variables.
+        TfElement index;
+        TfElement limit;
+
+        if (
+            !Array_pop(&interpreter->result_stack, &index) ||
+            !Array_pop(&interpreter->result_stack, &limit)
+        ) {
+            printf("Result stack underflow.\n");
+            return false;
+        }
+
+        // TODO: expand the numeric types allowed
+        if (index.type != limit.type || !(index.type == number || index.type == character)) {
+            printf("No numeric control variables on the stack.\n");
+            return false;
+        }
+
+        i = index.type == number ? index.numbervalue : index.charvalue;
+        l = limit.type == number ? limit.numbervalue : limit.charvalue;
+    }
+
+    // Don't use current_scope variable after this point
+    // since the array may relocate.
+
+    TfScope *new_scope = (TfScope*)Array_push(&interpreter->scope_stack);
+
+    if (!new_scope) {
+        printf("Out of memory.\n");
+        return false;
+    }
+
+    new_scope->type = DO;
+    new_scope->execution_flag = execution_flag;
+    new_scope->loop_control.do_label = interpreter->program_counter;
+    new_scope->loop_control.index = i;
+    new_scope->loop_control.limit = l;
+
+    return true;
+}
+
+/*
+ * Checks if the current scope is a DO.
+ * When execution is enabled, updates the loop control variable.
+ */
+bool loop_handler(TfInterpreter *interpreter) {
+    TfScope *current_scope = Array_last(&interpreter->scope_stack);
+
+    if (!current_scope) {
+        printf("Scope stack corrupted.\n");
+        return false;
+    }
+
+    if (current_scope->type != DO) {
+        printf("LOOP without DO detected.\n");
+        return false;
+    }
+
+    // If execution is off, just pop to NULL, we are fine
+    // with lexer validation.
+    if (!current_scope->execution_flag) {
+        Array_pop(&interpreter->scope_stack, NULL);
+        return true;
+    }
+
+    if (++current_scope->loop_control.index >= current_scope->loop_control.limit) {
+        Array_pop(&interpreter->scope_stack, NULL);
+        return true;
+    }
+
+    interpreter->program_counter = current_scope->loop_control.do_label;
+    return true;
+}
+
+bool leave_handler(TfInterpreter *interpreter) {
+    printf("not implemented\n"); return false;
+}
+bool i_handler(TfInterpreter *interpreter) {
+    printf("not implemented\n"); return false;
+}
+
 TypeInfo wordhandler_typeinfo = { .size = sizeof(WordHandler), .drop = NULL };
 
 int main(int argc, char *argv[]) {
@@ -1112,6 +1230,18 @@ int main(int argc, char *argv[]) {
     h = Dictionary_insert(&words, String_init("drop"));
     h->exec_always = false;
     h->func = drop_handler;
+    h = Dictionary_insert(&words, String_init("do"));
+    h->exec_always = true;
+    h->func = do_handler;
+    h = Dictionary_insert(&words, String_init("loop"));
+    h->exec_always = true;
+    h->func = loop_handler;
+    h = Dictionary_insert(&words, String_init("leave"));
+    h->exec_always = false;
+    h->func = leave_handler;
+    h = Dictionary_insert(&words, String_init("i"));
+    h->exec_always = false;
+    h->func = i_handler;
 
     bool istty = isatty(fileno(stdin));
 

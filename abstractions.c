@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -449,3 +450,16 @@ void* Array_last(Array *self) {
     return self->data + (self->len - 1) * self->typeinfo->size;
 }
 
+/*
+ * Safely retrieves a reference to an element
+ * of the array, or NULL if out of index.
+ * Paramters:
+ * index: index of the element.
+ */
+void* Array_at(Array *self, size_t index) {
+    if (self->len <= index) {
+        return NULL;
+    }
+
+    return self->data + index * self->typeinfo->size;
+}

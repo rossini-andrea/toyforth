@@ -76,4 +76,5 @@ void Array_drop(Array *self);
 void* Array_push(Array *self);
 bool Array_pop(Array *self, void *dest);
 void* Array_last(Array *self);
+void* Array_at(Array *self, size_t index);
 
