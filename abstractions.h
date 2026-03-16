@@ -57,6 +57,22 @@ typedef struct {
  */
 #define Array_foreach(a, t, x) for (t *x = (a)->data; x < (t*)((a)->data) + (a)->len; ++x)
 
+/* Forces typed reverse loop on an Array
+ * Parameters:
+ * a: a reference to an Array object
+ * t: the type to cast the elements
+ * x: iteration control variable
+ * Note:
+ * During iteration items can be modified, but the array MUST NOT be relocated.
+ */
+#define Array_rev_foreach(a, t, x) \
+    for ( \
+        t *x = (t*)((a)->data) + (a)->len - 1; \
+        x >= (t*)((a)->data); \
+        --x \
+    )
+
+
 String String_init(char *c_str);
 String String_copy(String str);
 String String_from_slice(char *c_str, size_t len);

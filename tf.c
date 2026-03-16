@@ -721,6 +721,13 @@ typedef struct {
 
 typedef bool (*WordHandlerFunc)(TfInterpreter *interpreter);
 
+/*
+ * Handler for a word.
+ * Members:
+ * exec_always: The word needs to run even when execution flag is off because
+ *              it performs lexical analisys or has effects on the scope stack.
+ * func:        Pointer to the implementation function.
+ */
 typedef struct {
     bool exec_always;
     WordHandlerFunc func;
@@ -762,6 +769,19 @@ bool TfInterpreter_init(TfInterpreter *self) {
 void TfInterpreter_drop(TfInterpreter *self) {
     Array_drop(&self->result_stack);
     Array_drop(&self->scope_stack);
+}
+
+/*
+ * Searches the innermost scope of the given type.
+ */
+TfScope *TfInterpreter_find_scope(TfInterpreter *interpreter, ScopeType scope_type) {
+    Array_rev_foreach(&interpreter->scope_stack, TfScope, scope) {
+        if (scope->type == scope_type) {
+            return scope;
+        }
+    }
+
+    return NULL;
 }
 
 /*
@@ -1197,11 +1217,46 @@ bool loop_handler(TfInterpreter *interpreter) {
     return true;
 }
 
+/*
+ * Search the innermost scope of type DO.
+ * All the scopes found are prevented from executing.
+ */
 bool leave_handler(TfInterpreter *interpreter) {
-    printf("not implemented\n"); return false;
+    Array_rev_foreach(&interpreter->scope_stack, TfScope, scope) {
+        scope->execution_flag = false;
+
+        if (scope->type == DO) {
+            return true;
+        }
+    }
+
+    printf("LEAVE without DO detected.\n");
+    return false;
 }
+
+/*
+ * Search the innermost scope of type DO.
+ * Push on the stack the current value of its index.
+ */
 bool i_handler(TfInterpreter *interpreter) {
-    printf("not implemented\n"); return false;
+    TfScope *do_scope = TfInterpreter_find_scope(interpreter, DO);
+
+    if (!do_scope) {
+        printf("I without DO detected.\n");
+        return false;
+    }
+
+    TfElement *dest = Array_push(&interpreter->result_stack);
+
+    if (!dest) {
+        printf("Out of memory.\n");
+        return false;
+    }
+
+    dest->type = number;
+    dest->numbervalue = do_scope->loop_control.index;
+
+    return true;
 }
 
 TypeInfo wordhandler_typeinfo = { .size = sizeof(WordHandler), .drop = NULL };
