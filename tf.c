@@ -826,12 +826,12 @@ TfScope *TfInterpreter_find_scope(TfInterpreter *interpreter, ScopeType scope_ty
 }
 
 /*
- * Pops all elements from the result stack and prints them.
+ * Pops the first element from the result stack and prints it.
  */
-void do_print(TfInterpreter *interpreter) {
+bool do_print(TfInterpreter *interpreter) {
     TfElement popped;
 
-    while (Array_pop(&interpreter->result_stack, &popped)) {
+    if (Array_pop(&interpreter->result_stack, &popped)) {
         if (popped.type == number) {
             printf("%d", popped.numbervalue);
         }
@@ -848,9 +848,17 @@ void do_print(TfInterpreter *interpreter) {
             printf("%s", popped.stringvalue->c_str);
         }
 
+        if (popped.type == character) {
+            printf("%c", popped.charvalue);
+        }
+
         TfElement_drop(&popped);
-        printf(" ");
+
+        return true;
     }
+
+    printf("Result stack underflow.\n");
+    return false;
 }
 
 Dictionary words;
