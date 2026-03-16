@@ -382,6 +382,19 @@ bool TfParser_parse(TfParser *parser) { // Open bracket without closing to surro
 
     /*
      * Parses a string escape sequence found in a string
+     * Escapes supported are C-like + custom when needed.
+     * \' 	single quote 	byte 0x27 in ASCII encoding
+     * \" 	double quote 	byte 0x22 in ASCII encoding
+     * \? 	question mark 	byte 0x3f in ASCII encoding
+     * \\ 	backslash    	byte 0x5c in ASCII encoding
+     * \a 	audible bell 	byte 0x07 in ASCII encoding
+     * \b 	backspace   	byte 0x08 in ASCII encoding
+     * \e	escape 	        byte 0x1b in ASCII encoding
+     * \f 	form feed - new page 	byte 0x0c in ASCII encoding
+     * \n 	line feed - new line 	byte 0x0a in ASCII encoding
+     * \r 	carriage return byte 0x0d in ASCII encoding
+     * \t 	horizontal tab 	byte 0x09 in ASCII encoding
+     * \v 	vertical tab 	byte 0x0b in ASCII encoding
      */
     STATE(TfParser_state_string_escape) {
         for (++parser->token;
@@ -392,9 +405,37 @@ bool TfParser_parse(TfParser *parser) { // Open bracket without closing to surro
             char out_char;
 
             switch (tok) {
-                case '\\':
+                case '\'':
                 case '\"':
+                case '\\':
                     out_char = tok;
+                    break;
+                case '?':
+                    out_char = 0x3f;
+                    break;
+                case 'a':
+                    out_char = '\a';
+                    break;
+                case 'b':
+                    out_char = '\b';
+                    break;
+                case 'f':
+                    out_char = '\f';
+                    break;
+                case 'n':
+                    out_char = '\n';
+                    break;
+                case 'r':
+                    out_char = '\r';
+                    break;
+                case 't':
+                    out_char = '\t';
+                    break;
+                case 'v':
+                    out_char = '\v';
+                    break;
+                case 'e':
+                    out_char = 0x1b;
                     break;
                 default:
                     printf("Unexpected token %c.\n", tok);
