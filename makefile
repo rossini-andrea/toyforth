@@ -1,28 +1,34 @@
 # Append my set of CFLAGS
 # Return type is enabled to avoid UB
 CFLAGS += -Werror=return-type -Wall -Wextra -O2
+BUILD = build
+SRC = src
+
+SOURCES = tf.c test.c abstractions.c
+OBJECTS = $(SOURCES:%.c=$(BUILD)/%.o)
+DEPEND = $(OBJECTS:.o=.d)
 
 default: tf
 
 all: tf test
 
-tf.o: tf.c abstractions.h
+$(BUILD):
+	mkdir $(BUILD)
 
-test.o: test.c abstractions.h
+$(BUILD)/%.o: $(SRC)/%.c $(BUILD)
+	cc $(CFLAGS) -c -MP -MMD -o $@ $<
 
-abstractions.o: abstractions.c abstractions.h
+-include $(DEPEND)
 
-%.o: %.c
-	cc $(CFLAGS) -c -o $@ $<
-
-tf: tf.o abstractions.o
+tf: $(BUILD)/tf.o $(BUILD)/abstractions.o
 	gcc $^ -o $@
 
-test: test.o abstractions.o
+test: $(BUILD)/test.o $(BUILD)/abstractions.o
 	gcc $^ -o $@
 
 clean:
-	-rm *.o tf test
+	-rm -Rf build
+	-rm tf test
 
 .PHONY: default all clean
 
