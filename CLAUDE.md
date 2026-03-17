@@ -40,11 +40,6 @@ To build with support for jump labels (preferred):
 CFLAGS=-DSTATE_MACHINE_AS_JUMP_LABELS make
 ```
 
-If you feel sure TCO will do its magic:
-```bash
-CFLAGS=-DTCO_ACTIVE make
-```
-
 To run tests:
 ```bash
 make test

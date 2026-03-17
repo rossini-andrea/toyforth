@@ -5,6 +5,7 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <assert.h>
+#include <errno.h>
 
 #include "abstractions.h"
 
@@ -138,6 +139,25 @@ bool TfParser_init(TfParser *parser, char *token, size_t linelen) {
 #endif
 
     return Array_init(&parser->result, &tfelement_typeinfo);
+}
+
+/*
+ * Resets the parser to parse a new line.
+ * Parameters:
+ * * parser: the parser to initialize.
+ * * token: the starting position of a string to parse.
+ * Notes:
+ * This method does not reset the result.
+ */
+void TfParser_new_line(TfParser *parser, char *token, size_t linelen) {
+    // Begin before the buffer. It selects a garbage
+    // memory location, but safety is guaranteed by the parser loop
+    // always fetching the next byte - expecially start state.
+    parser->token = token - 1;
+    parser->end = token + linelen;
+#ifndef STATE_MACHINE_AS_JUMP_LABELS
+    parser->state_func = TfParser_state_start;
+#endif
 }
 
 /*
@@ -1347,29 +1367,75 @@ int main(int argc, char *argv[]) {
     h->exec_always = false;
     h->func = i_handler;
 
-    bool istty = isatty(fileno(stdin));
+    if (argc == 1) {
+        bool istty = isatty(fileno(stdin));
 
-    while (1) {
-        char *line = NULL;
-        size_t linelen, linesize;
+        while (1) {
+            char *line = NULL;
+            size_t linelen;
 
-        if (istty) {
-            printf("tf> ");
+            if (istty) {
+                printf("tf> ");
+            }
+
+            fflush(stdout);
+
+            if (getline(&line, &linelen, stdin) < 0) {
+                break;
+            }
+
+            TfParser line_parser;
+
+            if (TfParser_init(&line_parser, line, linelen)) {
+                if (TfParser_parse(&line_parser)) {
+                    run_line(&line_parser.result);
+                }
+
+                TfParser_drop(&line_parser);
+            }
+
+            free(line);
+        }
+    } else if (argc == 2) {
+        FILE *src = fopen(argv[1], "r");
+
+        if (!src) {
+            perror("Unable to load program");
+            return errno;
+        }
+        
+        TfParser prg_parser;
+
+        if (!TfParser_init(&prg_parser, NULL, 0)) {
+            fclose(src);
+            return 1;
         }
 
-        fflush(stdout);
+        bool parse_ok = true;
 
-        if ((linelen = getline(&line, &linesize, stdin) - 1) < 0) {
-            break;
+        while (parse_ok) {
+            char *line = NULL;
+            size_t linelen;
+    
+            if (getline(&line, &linelen, src) < 0) {
+                break;
+            }
+
+            TfParser_new_line(&prg_parser, line, linelen);
+            parse_ok = TfParser_parse(&prg_parser);
+            free(line);
         }
 
-        TfParser line_parser;
-        TfParser_init(&line_parser, line, linelen);
-        TfParser_parse(&line_parser);
+        fclose(src);
+        
+        if (parse_ok) {
+            run_line(&prg_parser.result);
+        }
 
-        run_line(&line_parser.result);
-
-        TfParser_drop(&line_parser);
-        free(line);
+        TfParser_drop(&prg_parser);
+    } else {
+        return 1;
     }
+
+    return 0;
 }

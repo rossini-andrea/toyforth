@@ -4,9 +4,14 @@ ToyForth is an interpreted implementation of the Forth programming language.
 It does not aim for compliance nor completeness.
 
 This project exists because [@antirez](https://github.com/antirez) asked his
-followers to implement it during his C language lessons.
+followers to implement it during his C language lessons, though I suppose it
+diverged quite a lot, since I purposely skipped a good chunk of lessons to keep
+the challenge more interesting.
 
-## Currently supported words
+## Currently supported features
+
+This is an inaccurate but growing list of the features supported in this
+implementation.
 
 * Numeric `int` literals
 * `+-*/` operators
@@ -15,6 +20,7 @@ followers to implement it during his C language lessons.
 * `.` dot printing operator
 * `cr` prints a new line
 * `dup` and `drop`
+* `do`, `i`, `leave`, `loop`
 
 ## How `struct`s are treated
 
