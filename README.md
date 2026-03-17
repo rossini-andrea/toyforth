@@ -10,7 +10,7 @@ the challenge more interesting.
 
 ## Currently supported features
 
-This is an inaccurate but growing list of the features supported in this
+This is an inaccurate but growing list of the features supported by this
 implementation.
 
 * Numeric `int` literals
@@ -22,7 +22,23 @@ implementation.
 * `dup` and `drop`
 * `do`, `i`, `leave`, `loop`
 
-## How `struct`s are treated
+## Build & run
+
+The build is system uses a single GNU makefile. Build the program with:
+
+```bash
+CFLAGS=-DSTATE_MACHINE_AS_JUMP_LABELS make
+```
+
+Simply running `./tf` will enter an interactive shell. Every line is considered
+a complete program and runs immediately. To run a saved program just pass it as
+command line parameter. Eg.:
+
+```bash
+./tf progs/fibonacci.tf
+```
+
+## Coding details: how `struct`s are treated
 
 I loosely got influenced by Rust and C++ for memory handling, and I came up with
 the following rules:
@@ -57,14 +73,17 @@ If a method, or any other function, wants to own a struct, it must:
 * Optionally zero the struct.
 * If the struct needs to be consumed, `drop` it.
 
-> Dismemberment may be improved, maybe by making `drop` methods ignore
-> nullified fields, so a method interested in a single field can just change
-> owner, `NULL` it out, and call `drop`.
+> A structure that usually needs to release more than one field can support
+> dismemberment by making `drop` methods ignore nullified fields, so a method
+> interested in changing ownership of a single field can `NULL` it out, and
+> call `drop`.
 
 ## AI usage
 
 A local 16GB Radeon was stressed with llama.cpp+claude+qwen to review for
-memory leaks. No other LLMs were harmed in the making of this project.
-All code is hand crafted, except when stated, but since antirez is
-incorporating more and more LLM usage in his lessons, expect the same here.
+memory leaks. No other LLMs were harmed in the making of this project,
+but since antirez is incorporating more and more LLM usage in his lessons,
+expect the same here.
+
+Anyway, **all code is hand crafted**, except when stated.
 
